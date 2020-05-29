@@ -9,11 +9,10 @@ public class Controller {
     public Controller(TcpClient model) {
         this.model = model;
         View view = new View(this.model, this);
-        view.createView();
     }
 
     public void sendMessage(String name) {
-        MessageType type=model.parseText(name);
+        MessageType type=model.parseMessage(name);
         model.sendMessage(type,name);
     }
 }

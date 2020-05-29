@@ -16,14 +16,15 @@ public class TcpClient extends Observable implements Runnable {
 
     private final String ip;
     private final int port;
-    private Socket socket;
+    private boolean isJSON;
 
     ObjectOutputStream out;
 
     private boolean isLogin = false;
     private boolean exit = false;
 
-    public TcpClient(String ip, int port) {
+    public TcpClient(String ip, int port, boolean isJSON) {
+        this.isJSON = isJSON;
         this.ip = ip;
         this.port = port;
         loadCommands();
@@ -54,20 +55,25 @@ public class TcpClient extends Observable implements Runnable {
 
     @Override
     public void run() {
+        Socket socket;
+
         try {
             socket = new Socket(ip, port);
         } catch (IOException e) {
+            updateObservers(OutputType.ERROR, "Server isn't working now." + "\nTry to reconnect later");
             logger.log(Level.WARNING, "Server isn't working");
-            updateObservers(OutputType.ERROR, "Server isn't working now." + "\nTry again later");
+            exit = true;
+            return;
         }
 
-        try (ObjectOutputStream objectOutputStream = new ObjectOutputStream(socket.getOutputStream());
-             ObjectInputStream objectInputStream = new ObjectInputStream(socket.getInputStream())) {
 
-            out = objectOutputStream;
+        try (ObjectOutputStream outputStream = new ObjectOutputStream(socket.getOutputStream());
+             ObjectInputStream inputStream = new ObjectInputStream(socket.getInputStream())) {
+
+            out = outputStream;
 
             while (!exit) {
-                Message newMessage = (Message) objectInputStream.readObject();
+                Message newMessage = Message.deserialization(inputStream, isJSON);
 
                 if (newMessage.getType() == MessageType.SUCCESS_LOGIN) {
                     isLogin = true;
@@ -76,40 +82,38 @@ public class TcpClient extends Observable implements Runnable {
                     isLogin = false;
                     exit = true;
                 }
-
-                updateObservers(ObserverType(newMessage), newMessage.getText());
+                updateObservers(getObserverType(newMessage), newMessage.toString());
             }
 
         } catch (IOException e) {
-            logger.log(Level.WARNING, "Socket error", e);
-            updateObservers(OutputType.ERROR, "Something go wrong with a server!");
+            updateObservers(OutputType.ERROR, "Sorry, you are disconnected!");
         } catch (ClassNotFoundException e) {
             logger.log(Level.WARNING, "Object Input Stream error", e);
         }
 
-        if (socket != null) {
-            try {
-                socket.close();
-            } catch (IOException ioException) {
-                logger.log(Level.WARNING, "Cannot close socket", ioException);
-            }
-        }
-
-    }
-
-    public void sendMessage(Message message) {
         try {
-            out.writeObject(message);
-        } catch (IOException e) {
-            logger.log(Level.WARNING, Thread.currentThread().getName() + " can't send text");
+            socket.close();
+        } catch (IOException ioException) {
+            logger.log(Level.WARNING, "Cannot close socket", ioException);
         }
     }
+
 
     public void sendMessage(MessageType type, String text) {
-        sendMessage(new Message(type, text));
+        if (!exit) {
+            try {
+                new Message(type, text).serialization(out, isJSON);
+            } catch (IOException e) {
+                logger.log(Level.WARNING, Thread.currentThread().getName() + " can't send text");
+            }
+        }
     }
 
-    private OutputType ObserverType(Message message) {
+    public void setIsLogin(boolean isLogin) {
+        this.isLogin = isLogin;
+    }
+
+    public OutputType getObserverType(Message message) {
         MessageType type = message.getType();
 
         switch (type) {
@@ -125,7 +129,7 @@ public class TcpClient extends Observable implements Runnable {
     }
 
 
-    public MessageType parseText(String string) {
+    public MessageType parseMessage(String string) {
         if (!isLogin) {
             return MessageType.LOGIN;
         }

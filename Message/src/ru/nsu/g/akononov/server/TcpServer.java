@@ -1,9 +1,10 @@
 package ru.nsu.g.akononov.server;
+
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
-
 import java.util.Collections;
+import java.util.Deque;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.logging.Level;
@@ -12,66 +13,53 @@ import java.util.logging.Logger;
 import ru.nsu.g.akononov.message.*;
 
 public class TcpServer implements Runnable {
-    private static Logger logger = Logger.getLogger(TcpServer.class.getName());
+    private static final Logger logger = Logger.getLogger(TcpServer.class.getName());
 
-    private List<RequestProcessor> clients = Collections.synchronizedList(new LinkedList<>());
-    private final int port;
-    private ServerSocket serverSocket;
+    private final Deque<Message> lastMessages = new LinkedList<>();
+    private final List<SocketRequest> members = Collections.synchronizedList(new LinkedList<>());
+    public final ServerSocket serverSocket;
+    private boolean isJSON;
 
-    public TcpServer(int port) {
-        this.port = port;
+    public TcpServer(int port, boolean isJSON) throws IOException {
+            serverSocket = new ServerSocket(port);
+            this.isJSON = isJSON;
     }
 
-
-    public void close() {
-        if (serverSocket != null) {
-            try {
-                serverSocket.close();
-            } catch (IOException e) {
-                logger.log(Level.WARNING, "Couldn't close server socket");
-            }
-        }
-
-        for (RequestProcessor client : clients) {
-            try {
-                client.close();
-            } catch (IOException e) {
-                logger.log(Level.WARNING, "Couldn't close " + client.getName() + "'s socket");
-            }
-        }
-    }
-
-    public boolean addClient(RequestProcessor newClient, String name) {
+    public boolean addMember(SocketRequest newClient, String name) {
         if (newClient != null) {
-            for (RequestProcessor requestProcessor : clients) {
+            for (SocketRequest requestProcessor : members) {
                 if (requestProcessor.getName().equals(name)) {
                     return false;
                 }
             }
-            clients.add(newClient);
-            sendMessageAllClients(new Message(MessageType.TEXT_RESPONSE_SYSTEM, name +
-                    " has joined the chat\n"));
+            members.add(newClient);
+            sendMessageToAll(new Message(MessageType.TEXT_RESPONSE_SYSTEM, name +
+                    " has joined the chat"));
+            logger.log(Level.INFO, name + " has joined");
             return true;
         }
+
         logger.log(Level.WARNING, "Null pointer Client");
         throw new NullPointerException();
     }
 
-    public void removeClient(RequestProcessor client) {
+    public void removeMember(SocketRequest client) {
         if (client != null) {
-            clients.remove(client);
-            sendMessageAllClients(new Message(MessageType.TEXT_RESPONSE_SYSTEM, client.getName() +
-                    " has just left the chat\n"));
-            logger.log(Level.INFO, client.getName() + " has just removed");
+            members.remove(client);
+            sendMessageToAll(new Message(MessageType.TEXT_RESPONSE_SYSTEM, client.getName() +
+                    " has left the chat"));
+            logger.log(Level.INFO, client.getName() + " has left");
         }
     }
 
-    public void sendMessageAllClients(Message message) {
-        for (RequestProcessor client : clients) {
+    public void sendMessageToAll(Message message) {
+        for (SocketRequest client : members) {
             try {
                 client.sendMessage(message);
+                if (message.getType() == MessageType.TEXT_RESPONSE)
+                    logger.log(Level.INFO, client.getName() + " has sent " + message.getText());
             } catch (IOException e) {
-                removeClient(client);
+                removeMember(client);
                 logger.log(Level.WARNING, client.getName() + " has just couldn't send the message");
             }
         }
@@ -79,11 +67,12 @@ public class TcpServer implements Runnable {
 
     public String getUsers() {
         StringBuilder stringBuilder = new StringBuilder();
-        int count = 0;
+        int index = 0;
 
-        for (RequestProcessor client : clients) {
-            count++;
-            stringBuilder.append("№" + count + ":" + client.getName() + "\n");
+        stringBuilder.append("Users list:");
+        for (SocketRequest client : members) {
+            index++;
+            stringBuilder.append("\n").append(index).append(" : ").append(client.getName());
         }
         return stringBuilder.toString();
     }
@@ -91,25 +80,24 @@ public class TcpServer implements Runnable {
     @Override
     public void run() {
         try {
-            serverSocket = new ServerSocket(port);
             while (true) {
                 Socket socket = serverSocket.accept();
-                logger.log(Level.INFO, "Connection has received from " + socket.getInetAddress() +
-                        ":" + socket.getPort());
-                RequestProcessor newRequest = new RequestProcessor(socket, this);
-                Thread client = new Thread(newRequest);
-                client.start();
-                logger.log(Level.INFO, "Start RequestProcessor");
+
+                SocketRequest newRequest = new SocketRequest(lastMessages, socket, this, isJSON);
+                Thread member = new Thread(newRequest);
+                member.start();
             }
-        } catch (IOException e) {
-            logger.log(Level.WARNING, "Server couldn't create socket");
-        } finally {
-            if (serverSocket != null) {
-                try {
-                    serverSocket.close();
-                } catch (IOException e) {
-                    logger.log(Level.WARNING, "", e);
-                }
+        } catch (IOException ioException) {
+            close();
+        }
+    }
+
+    public void close() {
+        for (var member : members) {
+            try {
+                member.socket.close();
+            } catch (IOException ioException) {
+                logger.log(Level.WARNING, "Cannot close the socket");
             }
         }
     }

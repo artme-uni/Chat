@@ -7,88 +7,96 @@ import ru.nsu.g.akononov.client.mvc.model.TcpClient;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import javax.swing.text.BadLocationException;
-import javax.swing.text.Style;
-import javax.swing.text.StyleConstants;
-import javax.swing.text.StyledDocument;
+import javax.swing.text.*;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 public class View implements Observer {
-    private static final Logger logger = Logger.getLogger(View.class.getName());
-    private final int FRAME_WIDTH = 400;
-    private final int FRAME_HIGTH = 300;
+    private final Controller controller;
 
-    private TcpClient model;
-    private Controller controller;
+    private final JFrame appFrame = new JFrame();
+    private final JTextPane messages = new JTextPane();
 
-    private JFrame appFrame;
-    private JTextPane messages;
-    private JTextArea textToSend;
-    private JButton sendButton;
-    private String title = "Client";
+    private final JTextField textToSend = new JTextField("");
+
+    private final JButton usersButton = new JButton("Users");
+    private final JButton exitButton = new JButton("Leave");
+
+    private final JPanel bottomPanel = new JPanel(new BorderLayout());
+    private final JPanel mainPanel = new JPanel(new BorderLayout());
 
 
     public View(TcpClient model, Controller controller) {
-        this.model = model;
         this.controller = controller;
         model.registerObserver(this);
+        EventQueue.invokeLater(this::setSwingSettings);
     }
 
-    private synchronized void setSwingSettings() {
-        appFrame = new JFrame();
-        appFrame.setTitle(title);
-        appFrame.setSize(FRAME_WIDTH, FRAME_HIGTH);
-        appFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        appFrame.setLocationRelativeTo(null);
+    private void addLogPanel() {
+        MutableAttributeSet set = new javax.swing.text.SimpleAttributeSet(messages.getParagraphAttributes());
+        StyleConstants.setLineSpacing(set, (float)+0.5);
+        messages.setParagraphAttributes(set, false);
 
-        messages = new JTextPane();
         messages.setText("Enter your name:\n");
         messages.setEditable(false);
 
-        textToSend = new JTextArea();
-        textToSend.setLineWrap(true);
-        textToSend.setEditable(true);
-
-        JPanel mainPanel = new JPanel(new BorderLayout());
         JScrollPane jScrollPane = new JScrollPane(messages, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-
         mainPanel.add(jScrollPane, BorderLayout.CENTER);
-
-
-        JPanel bottomPanel = new JPanel(new BorderLayout());
-        bottomPanel.add(textToSend, BorderLayout.CENTER);
-        sendButton = new JButton("Send");
-        sendButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                String textMessage = textToSend.getText();
-                if (textMessage != null) {
-                    controller.sendMessage(textMessage);
-                }
-                textToSend.setText("");
-            }
-        });
-        bottomPanel.add(sendButton, BorderLayout.EAST);
-        bottomPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
-        mainPanel.add(bottomPanel, BorderLayout.SOUTH);
-        mainPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
-        appFrame.getContentPane().add(mainPanel);
-
-
-        appFrame.setVisible(true);
     }
 
-    public void createView() {
-        EventQueue.invokeLater(this::setSwingSettings);
+    private void addMessageField() {
+        textToSend.setEditable(true);
+        textToSend.addActionListener(e -> {
+            String textMessage = textToSend.getText();
+            if (textMessage != null) {
+                controller.sendMessage(textMessage);
+            }
+            textToSend.setText(null);
+        });
+
+        bottomPanel.add(textToSend, BorderLayout.CENTER);
+    }
+
+    private void addButtons() {
+        exitButton.addActionListener(e -> {
+            controller.sendMessage("/exit");
+        });
+
+        usersButton.addActionListener(e -> {
+            controller.sendMessage("/users");
+        });
+
+        bottomPanel.add(usersButton, BorderLayout.WEST);
+        bottomPanel.add(exitButton, BorderLayout.EAST);
+    }
+
+    private void setBorders(int borderSize) {
+        bottomPanel.setBorder(new EmptyBorder(borderSize, borderSize, borderSize, borderSize));
+        mainPanel.setBorder(new EmptyBorder(borderSize, borderSize, borderSize, borderSize));
+    }
+
+    private synchronized void setSwingSettings() {
+        appFrame.setTitle("Client");
+
+        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        appFrame.setSize(screenSize.width / 4, screenSize.height / 2);
+        appFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        appFrame.setLocationRelativeTo(null);
+
+        addLogPanel();
+        addMessageField();
+        addButtons();
+
+        setBorders(screenSize.height / 150);
+        mainPanel.add(bottomPanel, BorderLayout.SOUTH);
+
+        appFrame.getContentPane().add(mainPanel);
+        appFrame.setVisible(true);
     }
 
     @Override
     public synchronized void updateView(OutputType type, String text) {
+
         StyledDocument doc = messages.getStyledDocument();
         Style style = messages.addStyle("", null);
 
@@ -107,11 +115,12 @@ public class View implements Observer {
             }
         }
 
-        try {
-            doc.insertString(doc.getLength(), text + "\n", style);
-            doc.insertString(doc.getLength(), "AAA", style);
-        } catch (BadLocationException e) {
-            e.printStackTrace();
-        }
+        SwingUtilities.invokeLater(() -> {
+            try {
+                doc.insertString(doc.getLength(), text + "\n", style);
+            } catch (BadLocationException e) {
+                e.printStackTrace();
+            }
+        });
     }
 }

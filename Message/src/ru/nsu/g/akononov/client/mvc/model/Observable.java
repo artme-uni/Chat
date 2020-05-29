@@ -15,7 +15,7 @@ public class Observable {
         observers.add(observer);
     }
 
-    public void updateObservers(OutputType type, String text) {
+    public synchronized void updateObservers(OutputType type, String text) {
         for (Observer observer : observers) {
             observer.updateView(type, text);
         }
